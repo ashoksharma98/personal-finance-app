@@ -51,7 +51,7 @@ interface FinanceContextType {
   accounts: Account[];
   transactions: Transaction[];
   isLoading: boolean;
-  addBank: (name: string) => Promise<void>;
+  addBank: (name: string, id?: string) => Promise<string | void>;
   addAccount: (account: Omit<Account, 'id' | 'userId'>) => Promise<void>;
   addTransaction: (transaction: Omit<Transaction, 'id' | 'userId'>) => Promise<void>;
   updateTransaction: (id: string, transaction: Partial<Transaction>) => Promise<void>;
@@ -138,14 +138,15 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     };
   }, [user]);
 
-  const addBank = async (name: string) => {
+  const addBank = async (name: string, customId?: string) => {
     if (!user) return;
-    const id = crypto.randomUUID();
+    const id = customId || crypto.randomUUID();
     await setDoc(doc(db, 'banks', id), {
       id,
       userId: user.id,
       name
     });
+    return id;
   };
 
   const addAccount = async (account: Omit<Account, 'id' | 'userId'>) => {
