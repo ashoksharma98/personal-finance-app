@@ -1,0 +1,145 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: /users/{userId}
+    // Fields:
+    //   - uid: string (required) - The unique ID of the user.
+    //   - email: string (required, email format) - The user's email address.
+    //   - displayName: string (optional) - The user's full name.
+    //   - createdAt: string (optional, date-time format) - When the user account was created.
+    //
+    // Collection: /banks/{bankId}
+    // Fields:
+    //   - id: string (required) - Unique ID for the bank.
+    //   - userId: string (required) - ID of the user who owns this bank entry.
+    //   - name: string (required) - Name of the bank.
+    //
+    // Collection: /accounts/{accountId}
+    // Fields:
+    //   - id: string (required) - Unique ID for the account.
+    //   - userId: string (required) - ID of the user who owns this account.
+    //   - bankId: string (required) - ID of the bank this account belongs to.
+    //   - accountName: string (required) - Name of the account.
+    //   - accountType: string (required, enum: savings, checking, credit, investment) - Type of account.
+    //   - openingBalance: number (required) - Initial balance.
+    //   - currentBalance: number (required) - Current balance.
+    //
+    // Collection: /transactions/{transactionId}
+    // Fields:
+    //   - id: string (required) - Unique ID for the transaction.
+    //   - userId: string (required) - ID of the user who owns this transaction.
+    //   - accountId: string (required) - ID of the account this transaction belongs to.
+    //   - type: string (required, enum: credit, debit) - Transaction type.
+    //   - amount: number (required, positive) - Transaction amount.
+    //   - category: string (required) - Transaction category.
+    //   - date: string (required, date-time format) - Date of transaction.
+    //   - note: string (optional) - Optional note.
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function uidUnchanged() {
+      return !('userId' in request.resource.data) || request.resource.data.userId == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('userId' in request.resource.data) || request.resource.data.userId == resource.data.userId;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'email']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             (data.displayName == null || (data.displayName is string && data.displayName.size() < 100));
+    }
+
+    function isValidBank(data) {
+      return hasRequiredFields(['id', 'userId', 'name']) &&
+             data.userId == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100;
+    }
+
+    function isValidAccount(data) {
+      return hasRequiredFields(['id', 'userId', 'bankId', 'accountName', 'accountType', 'openingBalance', 'currentBalance']) &&
+             data.userId == request.auth.uid &&
+             data.accountType in ['savings', 'checking', 'credit', 'investment'] &&
+             data.openingBalance is number &&
+             data.currentBalance is number;
+    }
+
+    function isValidTransaction(data) {
+      return hasRequiredFields(['id', 'userId', 'accountId', 'type', 'amount', 'category', 'date']) &&
+             data.userId == request.auth.uid &&
+             data.type in ['credit', 'debit'] &&
+             data.amount is number && data.amount >= 0 &&
+             data.category is string && data.category.size() > 0;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+
+    match /banks/{bankId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidBank(request.resource.data);
+      allow update: if isDocOwner() && isValidBank(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner();
+    }
+
+    match /accounts/{accountId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidAccount(request.resource.data);
+      allow update: if isDocOwner() && isValidAccount(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner();
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data);
+      allow update: if isDocOwner() && isValidTransaction(request.resource.data) && uidNotModified();
+      allow delete: if isDocOwner();
+    }
+  }
+}

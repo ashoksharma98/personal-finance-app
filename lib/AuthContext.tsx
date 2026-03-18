@@ -2,6 +2,16 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { 
+  onAuthStateChanged, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut,
+  updateProfile,
+  User as FirebaseUser
+} from 'firebase/auth';
+import { auth, db } from '@/firebase';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 interface User {
   id: string;
@@ -26,19 +36,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const response = await fetch('/api/auth/me');
-        const data = await response.json();
-        setUser(data.user);
-      } catch (error) {
-        console.error('Auth check failed:', error);
-      } finally {
-        setIsLoading(false);
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        // Fetch additional user data from Firestore if needed
+        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+        const userData = userDoc.exists() ? userDoc.data() : null;
+        
+        setUser({
+          id: firebaseUser.uid,
+          email: firebaseUser.email || '',
+          name: userData?.displayName || firebaseUser.displayName || '',
+        });
+      } else {
+        setUser(null);
       }
-    };
+      setIsLoading(false);
+    });
 
-    checkAuth();
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -53,39 +68,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user, isLoading, pathname, router]);
 
   const login = async (email: string, password: string) => {
-    const response = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || 'Login failed');
-    }
-
-    setUser(data.user);
-    router.push('/');
+    await signInWithEmailAndPassword(auth, email, password);
   };
 
   const signup = async (email: string, password: string, name: string) => {
-    const response = await fetch('/api/auth/signup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name }),
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const firebaseUser = userCredential.user;
+
+    // Update profile
+    await updateProfile(firebaseUser, { displayName: name });
+
+    // Create user document in Firestore
+    await setDoc(doc(db, 'users', firebaseUser.uid), {
+      uid: firebaseUser.uid,
+      email: firebaseUser.email,
+      displayName: name,
+      createdAt: new Date().toISOString(),
     });
 
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || 'Signup failed');
-    }
-
-    setUser(data.user);
-    router.push('/');
+    setUser({
+      id: firebaseUser.uid,
+      email: firebaseUser.email || '',
+      name: name,
+    });
   };
 
   const logout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    await signOut(auth);
     setUser(null);
     router.push('/login');
   };

@@ -1,169 +1,241 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Bank, Account, Transaction } from './types';
+import { 
+  collection, 
+  query, 
+  where, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  setDoc,
+  orderBy,
+  getDocFromServer
+} from 'firebase/firestore';
+import { db, auth } from '@/firebase';
+import { useAuth } from './AuthContext';
+
+export interface Bank {
+  id: string;
+  userId: string;
+  name: string;
+}
+
+export interface Account {
+  id: string;
+  userId: string;
+  bankId: string;
+  accountName: string;
+  accountNumber: string;
+  lastFourDigits: string;
+  accountType: 'savings' | 'checking' | 'credit' | 'investment';
+  openingBalance: number;
+  currentBalance: number;
+}
+
+export interface Transaction {
+  id: string;
+  userId: string;
+  accountId: string;
+  type: 'credit' | 'debit';
+  amount: number;
+  category: string;
+  date: string;
+  note?: string;
+}
 
 interface FinanceContextType {
   banks: Bank[];
   accounts: Account[];
   transactions: Transaction[];
-  addBank: (name: string, id?: string) => Promise<void>;
-  addAccount: (account: Omit<Account, 'id' | 'currentBalance'>) => Promise<void>;
-  addTransaction: (transaction: Omit<Transaction, 'id'>) => Promise<void>;
-  updateTransaction: (id: string, transaction: Omit<Transaction, 'id'>) => Promise<void>;
-  deleteTransaction: (id: string) => Promise<void>;
   isLoading: boolean;
+  addBank: (name: string) => Promise<void>;
+  addAccount: (account: Omit<Account, 'id' | 'userId'>) => Promise<void>;
+  addTransaction: (transaction: Omit<Transaction, 'id' | 'userId'>) => Promise<void>;
+  updateTransaction: (id: string, transaction: Partial<Transaction>) => Promise<void>;
+  deleteTransaction: (id: string) => Promise<void>;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 export function FinanceProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
   const [banks, setBanks] = useState<Bank[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch initial data
+  // Validate connection to Firestore
   useEffect(() => {
-    const fetchData = async () => {
+    async function testConnection() {
       try {
-        const response = await fetch('/api/finance');
-        const data = await response.json();
-        if (data.banks) setBanks(data.banks);
-        if (data.accounts) setAccounts(data.accounts);
-        if (data.transactions) setTransactions(data.transactions);
+        await getDocFromServer(doc(db, 'test', 'connection'));
       } catch (error) {
-        console.error('Failed to fetch finance data:', error);
-      } finally {
-        setIsLoading(false);
+        if(error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration. ");
+        }
       }
-    };
-
-    fetchData();
+    }
+    testConnection();
   }, []);
 
-  const addBank = async (name: string, id?: string) => {
-    const newBank: Bank = { id: id || crypto.randomUUID(), name };
-    try {
-      await fetch('/api/banks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newBank),
-      });
-      setBanks(prev => [...prev, newBank]);
-    } catch (error) {
-      console.error('Failed to add bank:', error);
-    }
-  };
-
-  const addAccount = async (accountData: Omit<Account, 'id' | 'currentBalance'>) => {
-    const newAccount: Account = {
-      ...accountData,
-      id: crypto.randomUUID(),
-      currentBalance: accountData.openingBalance,
-    };
-    try {
-      await fetch('/api/accounts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newAccount),
-      });
-      setAccounts(prev => [...prev, newAccount]);
-    } catch (error) {
-      console.error('Failed to add account:', error);
-    }
-  };
-
-  const addTransaction = async (transactionData: Omit<Transaction, 'id'>) => {
-    const newTransaction: Transaction = {
-      ...transactionData,
-      id: crypto.randomUUID(),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const resetState = () => {
+      setBanks([]);
+      setAccounts([]);
+      setTransactions([]);
+      setIsLoading(false);
     };
 
-    try {
-      await fetch('/api/transactions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newTransaction),
-      });
-      
-      setTransactions(prev => [newTransaction, ...prev]);
-
-      // Update account balance locally
-      setAccounts(prevAccounts => 
-        prevAccounts.map(acc => {
-          if (acc.id === transactionData.accountId) {
-            const amount = transactionData.type === 'credit' ? transactionData.amount : -transactionData.amount;
-            return { ...acc, currentBalance: acc.currentBalance + amount };
-          }
-          return acc;
-        })
-      );
-    } catch (error) {
-      console.error('Failed to add transaction:', error);
+    if (!user) {
+      resetState();
+      return;
     }
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsLoading(true);
+
+    // Listen for banks
+    const banksQuery = query(collection(db, 'banks'), where('userId', '==', user.id));
+    const unsubscribeBanks = onSnapshot(banksQuery, (snapshot) => {
+      const banksData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bank));
+      setBanks(banksData);
+    }, (error) => {
+      console.error('Firestore Error (banks): ', error);
+    });
+
+    // Listen for accounts
+    const accountsQuery = query(collection(db, 'accounts'), where('userId', '==', user.id));
+    const unsubscribeAccounts = onSnapshot(accountsQuery, (snapshot) => {
+      const accountsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account));
+      setAccounts(accountsData);
+    }, (error) => {
+      console.error('Firestore Error (accounts): ', error);
+    });
+
+    // Listen for transactions
+    const transactionsQuery = query(
+      collection(db, 'transactions'), 
+      where('userId', '==', user.id),
+      orderBy('date', 'desc')
+    );
+    const unsubscribeTransactions = onSnapshot(transactionsQuery, (snapshot) => {
+      const transactionsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction));
+      setTransactions(transactionsData);
+      setIsLoading(false);
+    }, (error) => {
+      console.error('Firestore Error (transactions): ', error);
+      setIsLoading(false);
+    });
+
+    return () => {
+      unsubscribeBanks();
+      unsubscribeAccounts();
+      unsubscribeTransactions();
+    };
+  }, [user]);
+
+  const addBank = async (name: string) => {
+    if (!user) return;
+    const id = crypto.randomUUID();
+    await setDoc(doc(db, 'banks', id), {
+      id,
+      userId: user.id,
+      name
+    });
   };
 
-  const updateTransaction = async (id: string, transactionData: Omit<Transaction, 'id'>) => {
-    const oldTransaction = transactions.find(t => t.id === id);
-    if (!oldTransaction) return;
+  const addAccount = async (account: Omit<Account, 'id' | 'userId'>) => {
+    if (!user) return;
+    const id = crypto.randomUUID();
+    await setDoc(doc(db, 'accounts', id), {
+      ...account,
+      id,
+      userId: user.id
+    });
+  };
 
-    try {
-      await fetch(`/api/transactions/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(transactionData),
+  const addTransaction = async (transaction: Omit<Transaction, 'id' | 'userId'>) => {
+    if (!user) return;
+    const id = crypto.randomUUID();
+    
+    // Update account balance
+    const accountRef = doc(db, 'accounts', transaction.accountId);
+    const accountDoc = await getDocFromServer(accountRef);
+    if (accountDoc.exists()) {
+      const currentBalance = accountDoc.data().currentBalance;
+      const amountChange = transaction.type === 'credit' ? transaction.amount : -transaction.amount;
+      await updateDoc(accountRef, {
+        currentBalance: currentBalance + amountChange
       });
-
-      setTransactions(prev => prev.map(t => t.id === id ? { ...transactionData, id } : t));
-
-      // Update account balances locally
-      setAccounts(prevAccounts => 
-        prevAccounts.map(acc => {
-          let balance = acc.currentBalance;
-          
-          if (acc.id === oldTransaction.accountId) {
-            const oldAmount = oldTransaction.type === 'credit' ? -oldTransaction.amount : oldTransaction.amount;
-            balance += oldAmount;
-          }
-          
-          if (acc.id === transactionData.accountId) {
-            const newAmount = transactionData.type === 'credit' ? transactionData.amount : -transactionData.amount;
-            balance += newAmount;
-          }
-          
-          return { ...acc, currentBalance: balance };
-        })
-      );
-    } catch (error) {
-      console.error('Failed to update transaction:', error);
     }
+
+    await setDoc(doc(db, 'transactions', id), {
+      ...transaction,
+      id,
+      userId: user.id
+    });
+  };
+
+  const updateTransaction = async (id: string, newData: Partial<Transaction>) => {
+    if (!user) return;
+    
+    const transactionRef = doc(db, 'transactions', id);
+    const transactionDoc = await getDocFromServer(transactionRef);
+    if (!transactionDoc.exists()) return;
+    
+    const oldTransaction = transactionDoc.data() as Transaction;
+    
+    // Revert old balance
+    const oldAccountRef = doc(db, 'accounts', oldTransaction.accountId);
+    const oldAccountDoc = await getDocFromServer(oldAccountRef);
+    if (oldAccountDoc.exists()) {
+      const oldBalance = oldAccountDoc.data().currentBalance;
+      const oldAmountChange = oldTransaction.type === 'credit' ? -oldTransaction.amount : oldTransaction.amount;
+      await updateDoc(oldAccountRef, {
+        currentBalance: oldBalance + oldAmountChange
+      });
+    }
+
+    // Apply new balance
+    const updatedTransaction = { ...oldTransaction, ...newData };
+    const newAccountRef = doc(db, 'accounts', updatedTransaction.accountId);
+    const newAccountDoc = await getDocFromServer(newAccountRef);
+    if (newAccountDoc.exists()) {
+      const newBalance = newAccountDoc.data().currentBalance;
+      const newAmountChange = updatedTransaction.type === 'credit' ? updatedTransaction.amount : -updatedTransaction.amount;
+      await updateDoc(newAccountRef, {
+        currentBalance: newBalance + newAmountChange
+      });
+    }
+
+    await updateDoc(transactionRef, newData);
   };
 
   const deleteTransaction = async (id: string) => {
-    const transactionToDelete = transactions.find(t => t.id === id);
-    if (!transactionToDelete) return;
-
-    try {
-      await fetch(`/api/transactions/${id}`, {
-        method: 'DELETE',
+    if (!user) return;
+    
+    const transactionRef = doc(db, 'transactions', id);
+    const transactionDoc = await getDocFromServer(transactionRef);
+    if (!transactionDoc.exists()) return;
+    
+    const transaction = transactionDoc.data() as Transaction;
+    
+    // Revert balance
+    const accountRef = doc(db, 'accounts', transaction.accountId);
+    const accountDoc = await getDocFromServer(accountRef);
+    if (accountDoc.exists()) {
+      const currentBalance = accountDoc.data().currentBalance;
+      const amountChange = transaction.type === 'credit' ? -transaction.amount : transaction.amount;
+      await updateDoc(accountRef, {
+        currentBalance: currentBalance + amountChange
       });
-
-      setTransactions(transactions.filter(t => t.id !== id));
-
-      // Revert account balance locally
-      setAccounts(prevAccounts => 
-        prevAccounts.map(acc => {
-          if (acc.id === transactionToDelete.accountId) {
-            const amount = transactionToDelete.type === 'credit' ? -transactionToDelete.amount : transactionToDelete.amount;
-            return { ...acc, currentBalance: acc.currentBalance + amount };
-          }
-          return acc;
-        })
-      );
-    } catch (error) {
-      console.error('Failed to delete transaction:', error);
     }
+
+    await deleteDoc(transactionRef);
   };
 
   return (
@@ -171,12 +243,12 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       banks, 
       accounts, 
       transactions, 
+      isLoading, 
       addBank, 
       addAccount, 
       addTransaction,
       updateTransaction,
-      deleteTransaction,
-      isLoading 
+      deleteTransaction
     }}>
       {children}
     </FinanceContext.Provider>

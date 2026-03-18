@@ -1,0 +1,78 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores user-specific information and settings.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The unique ID of the user." },
+        "email": { "type": "string", "format": "email", "description": "The user's email address." },
+        "displayName": { "type": "string", "description": "The user's full name." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the user account was created." }
+      },
+      "required": ["uid", "email"]
+    },
+    "Bank": {
+      "title": "Bank",
+      "description": "Represents a banking institution.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique ID for the bank." },
+        "userId": { "type": "string", "description": "ID of the user who owns this bank entry." },
+        "name": { "type": "string", "description": "Name of the bank." }
+      },
+      "required": ["id", "userId", "name"]
+    },
+    "Account": {
+      "title": "Account",
+      "description": "Represents a specific bank account.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique ID for the account." },
+        "userId": { "type": "string", "description": "ID of the user who owns this account." },
+        "bankId": { "type": "string", "description": "ID of the bank this account belongs to." },
+        "accountName": { "type": "string", "description": "Name of the account (e.g., Savings, Checking)." },
+        "accountNumber": { "type": "string", "description": "Masked or full account number." },
+        "lastFourDigits": { "type": "string", "description": "Last four digits of the account number." },
+        "accountType": { "type": "string", "enum": ["savings", "checking", "credit", "investment"], "description": "Type of account." },
+        "openingBalance": { "type": "number", "description": "Initial balance when the account was added." },
+        "currentBalance": { "type": "number", "description": "Current balance after all transactions." }
+      },
+      "required": ["id", "userId", "bankId", "accountName", "accountType", "openingBalance", "currentBalance"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Represents a financial transaction.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique ID for the transaction." },
+        "userId": { "type": "string", "description": "ID of the user who owns this transaction." },
+        "accountId": { "type": "string", "description": "ID of the account this transaction belongs to." },
+        "type": { "type": "string", "enum": ["credit", "debit"], "description": "Whether it's an income (credit) or expense (debit)." },
+        "amount": { "type": "number", "description": "Transaction amount." },
+        "category": { "type": "string", "description": "Category of the transaction (e.g., Food, Rent, Salary)." },
+        "date": { "type": "string", "format": "date-time", "description": "Date and time of the transaction." },
+        "note": { "type": "string", "description": "Optional note for the transaction." }
+      },
+      "required": ["id", "userId", "accountId", "type", "amount", "category", "date"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile documents."
+    },
+    "/banks/{bankId}": {
+      "schema": "Bank",
+      "description": "Banks registered by users."
+    },
+    "/accounts/{accountId}": {
+      "schema": "Account",
+      "description": "Accounts registered by users."
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Transactions recorded by users."
+    }
+  }
+}

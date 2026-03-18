@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/AuthContext';
 import Link from 'next/link';
 import { motion } from 'motion/react';
 import { Wallet } from 'lucide-react';
+import { mapFirebaseError } from '@/lib/error-mapping';
 
 export default function SignupPage() {
   const [email, setEmail] = useState('');
@@ -28,7 +29,7 @@ export default function SignupPage() {
     try {
       await signup(email, password, name);
     } catch (err: any) {
-      setError(err.message);
+      setError(mapFirebaseError(err));
     } finally {
       setIsSubmitting(false);
     }
