@@ -40,7 +40,7 @@ export default function AddAccountModal({ isOpen, onClose }: { isOpen: boolean, 
           accountName,
           lastFourDigits: lastFour,
           openingBalance: parseFloat(openingBalance) || 0,
-          accountType: 'Savings', // Default
+          accountType: 'savings', // Default
           accountNumber: '****' + lastFour, // Placeholder
         });
         
